@@ -31,7 +31,8 @@ function getWebhook() {
 }
 
 function markerExists() {
-  try { git(`rev-parse --verify ${MARKER}`, { stdio: 'ignore' }); return true; }
+  // Note: don't route through git() — its .trim() throws when stdout is ignored.
+  try { execSync(`git rev-parse --verify ${MARKER}`, { stdio: 'ignore' }); return true; }
   catch { return false; }
 }
 
