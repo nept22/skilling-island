@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+
+# Secret: Discord webhook URL — never push this to GitHub
+.dev/discord-webhook
