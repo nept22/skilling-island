@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   SIZE, HALF, ISLAND, BANK_CHEST, RANGE,
   inBay, inBridge, isRiverTile, isMarketStreet, isDockPier,
@@ -167,31 +166,94 @@ export class World {
   }
 
   private build(): void {
-    const geos: THREE.BufferGeometry[] = [];
-    const color = new THREE.Color();
-    for (let x = 0; x < SIZE; x++) {
-      for (let z = 0; z < SIZE; z++) {
-        const t = this.tiles[x][z];
-        if (t.type === 'ocean' || t.type === 'river') continue;
-        const base =
-          t.type === 'grass'  ? 0x69a854 :
-          t.type === 'sand'   ? 0xdcc894 :
-          t.type === 'bridge' ? 0xcc3333 :
-          t.type === 'path'   ? 0x8a7a68 :
-          t.type === 'dock'   ? 0x8B5E3C : 0x96703f;
-        color.setHex(base).offsetHSL(0, 0, (hash(x * 7 + 3, z * 13 + 1) - 0.5) * 0.05);
-        const g = new THREE.BoxGeometry(1, 0.5, 1);
-        const count = g.attributes.position.count;
-        const colors = new Float32Array(count * 3);
-        for (let i = 0; i < count; i++) color.toArray(colors, i * 3);
-        g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        const w = toWorld(x, z);
-        g.translate(w.x, -0.25, w.z);
-        geos.push(g);
+    // One subdivided plane covers the whole island. 2 segments per tile gives
+    // interior vertices that carry bilinear-blended colours and heights so tile
+    // boundaries fade smoothly instead of snapping. Ocean/river tiles are given
+    // sand colour and negative height so they slide below the water plane; the
+    // coast therefore dips naturally without any extra geometry.
+    const SEGS = SIZE * 2; // 145×145 vertices — cheaper than the old ~84k box verts
+
+    // Precompute colour and height per tile (SIZE+1 to cover the +1 look-up
+    // in bilinear sampling without a per-vertex bounds check).
+    const STRIDE = SIZE + 1;
+    const tileCols = new Array<THREE.Color>(STRIDE * STRIDE);
+    const tileHts  = new Float32Array(STRIDE * STRIDE);
+
+    const tileHex = (tx: number, tz: number): number => {
+      const t = this.tiles[tx]?.[tz];
+      if (!t) return 0xdcc894;
+      switch (t.type) {
+        case 'grass':  return 0x69a854;
+        case 'bridge': return 0xcc3333;
+        case 'path':   return 0x8a7a68;
+        case 'dock':   return 0x8B5E3C;
+        // ocean + river blend as sand so the beach fades naturally into water
+        default:       return 0xdcc894;
+      }
+    };
+
+    for (let tx = 0; tx <= SIZE; tx++) {
+      for (let tz = 0; tz <= SIZE; tz++) {
+        const si = tx * STRIDE + tz;
+        const col = new THREE.Color(tileHex(tx, tz));
+        col.offsetHSL(0, 0, (hash(tx * 7 + 3, tz * 13 + 1) - 0.5) * 0.05);
+        tileCols[si] = col;
+        const t = this.tiles[tx]?.[tz];
+        tileHts[si] = (!t || t.type === 'ocean' || t.type === 'river')
+          ? -0.45
+          : (hash(tx * 3 + 7, tz * 11 + 5) - 0.5) * 0.1;
       }
     }
+
+    // Clamp tile index to [0, SIZE] for edge vertices whose +1 neighbour is
+    // outside the grid; reuses the border tile's values harmlessly.
+    const ci = (tx: number, tz: number) =>
+      Math.min(tx, SIZE) * STRIDE + Math.min(tz, SIZE);
+
+    const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEGS, SEGS);
+    geo.rotateX(-Math.PI / 2); // XY plane → XZ ground plane
+
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const vertCount = pos.count;
+    const vertColors = new Float32Array(vertCount * 3);
+    const scratch = new THREE.Color();
+
+    for (let vi = 0; vi < vertCount; vi++) {
+      // After rotateX(-PI/2): getX = world X, getZ = world Z, getY = 0.
+      const wx = pos.getX(vi);
+      const wz = pos.getZ(vi);
+
+      // Fractional position within the tile grid
+      const fx = wx + HALF;   // 0 … SIZE
+      const fz = wz + HALF;
+      const tx = Math.floor(fx);
+      const tz = Math.floor(fz);
+      const ux = fx - tx;     // 0 … 1 within the tile
+      const uz = fz - tz;
+
+      // Bilinear blend of the four surrounding tiles
+      const c00 = tileCols[ci(tx,   tz)];   const h00 = tileHts[ci(tx,   tz)];
+      const c10 = tileCols[ci(tx+1, tz)];   const h10 = tileHts[ci(tx+1, tz)];
+      const c01 = tileCols[ci(tx,   tz+1)]; const h01 = tileHts[ci(tx,   tz+1)];
+      const c11 = tileCols[ci(tx+1, tz+1)]; const h11 = tileHts[ci(tx+1, tz+1)];
+
+      const w00 = (1-ux)*(1-uz), w10 = ux*(1-uz), w01 = (1-ux)*uz, w11 = ux*uz;
+
+      scratch.setRGB(
+        c00.r*w00 + c10.r*w10 + c01.r*w01 + c11.r*w11,
+        c00.g*w00 + c10.g*w10 + c01.g*w01 + c11.g*w11,
+        c00.b*w00 + c10.b*w10 + c01.b*w01 + c11.b*w11,
+      ).toArray(vertColors, vi * 3);
+
+      pos.setY(vi, h00*w00 + h10*w10 + h01*w01 + h11*w11);
+    }
+    pos.needsUpdate = true;
+
+    geo.setAttribute('color', new THREE.BufferAttribute(vertColors, 3));
+    geo.computeVertexNormals();
+
     const ground = new THREE.Mesh(
-      mergeGeometries(geos),
+      geo,
       new THREE.MeshLambertMaterial({ vertexColors: true }),
     );
     ground.receiveShadow = true;
