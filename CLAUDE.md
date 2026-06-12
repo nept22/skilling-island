@@ -26,6 +26,11 @@ session that did it:
 The `[builder]` / `[thinker]` prefix is what groups the changelog by author. Use
 `[builder]` in the Sonnet session and `[thinker]` in the Opus session.
 
+**Before a session ends (especially when context is running low), commit everything.**
+Sessions don't carry over — only git does. Committed work is visible to every future
+session and to the changelog; work left only in the chat dies with that session. When
+wrapping up or near a full context window, commit all outstanding changes first.
+
 ### Rule 2 — never POST to Discord yourself
 
 Do **not** call the Discord webhook directly from either session, and do not add
