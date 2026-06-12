@@ -20,8 +20,10 @@ export interface FishingSpot {
 }
 
 export function createSpots(world: World): FishingSpot[] {
-  const river = world.findFishableWater(['river'], { x: 21, z: 28 });
-  const sea = world.findFishableWater(['ocean'], { x: 30, z: 36 });
+  // Near-hints guide findFishableWater to preferred spots on the 72×72 map.
+  // River: mid-river around the bridge zone; bay: near the centre dock pier.
+  const river = world.findFishableWater(['river'], { x: 36, z: 30 });
+  const sea   = world.findFishableWater(['ocean'], { x: 45, z: 54 });
   return [
     makeSpot(river.x, river.z, 'River fishing spot', [
       { item: 'raw_shrimp', level: 1, xp: 10, weight: 70 },

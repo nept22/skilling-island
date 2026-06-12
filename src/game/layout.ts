@@ -24,6 +24,16 @@ export const MINE_HILLS = { x0: 50, x1: 64, z0: 10, z1: 24 } as const;
 export const BANK_CHEST = { x: 46, z: 40 } as const;
 export const RANGE      = { x: 44, z: 40 } as const;
 
+// Market street — path tiles along the bay shore inside the town zone
+export const MARKET_STREET = { x0: 40, x1: 54, z0: 50, z1: 51 } as const;
+
+// Three dock piers running south from the shore into the bay
+export const DOCK_PIERS = [
+  { x: 41, zStart: 52, zEnd: 57 },
+  { x: 45, zStart: 52, zEnd: 57 },
+  { x: 49, zStart: 52, zEnd: 57 },
+] as const;
+
 // River centerline waypoints: source (north) → delta mouth (south)
 const RIVER_WP = [
   { x: 38, z: 0 },
@@ -81,4 +91,13 @@ export function inForest(x: number, z: number): boolean {
 
 export function inMineHills(x: number, z: number): boolean {
   return x >= MINE_HILLS.x0 && x <= MINE_HILLS.x1 && z >= MINE_HILLS.z0 && z <= MINE_HILLS.z1;
+}
+
+export function isMarketStreet(x: number, z: number): boolean {
+  return x >= MARKET_STREET.x0 && x <= MARKET_STREET.x1
+      && z >= MARKET_STREET.z0 && z <= MARKET_STREET.z1;
+}
+
+export function isDockPier(x: number, z: number): boolean {
+  return DOCK_PIERS.some((p) => p.x === x && z >= p.zStart && z <= p.zEnd);
 }

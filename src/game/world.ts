@@ -2,13 +2,14 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   SIZE, HALF, ISLAND, BANK_CHEST, RANGE,
-  inBay, inBridge, isRiverTile, inTown, inForest, inMineHills,
+  inBay, inBridge, isRiverTile, isMarketStreet, isDockPier,
+  inTown, inForest, inMineHills,
 } from './layout';
 
 // Re-export SIZE so pathfinding.ts and any other consumers keep working.
 export { SIZE, HALF } from './layout';
 
-export type TileType = 'ocean' | 'river' | 'sand' | 'grass' | 'bridge';
+export type TileType = 'ocean' | 'river' | 'sand' | 'grass' | 'bridge' | 'path' | 'dock';
 
 export interface Tile {
   x: number;
@@ -90,7 +91,10 @@ export class World {
       this.tiles[x] = [];
       for (let z = 0; z < SIZE; z++) {
         let type: TileType;
-        if (inBay(x, z)) {
+        if (isDockPier(x, z)) {
+          // Dock piers sit inside the bay bounds, so check before inBay.
+          type = 'dock';
+        } else if (inBay(x, z)) {
           type = 'ocean';
         } else {
           const nx = (x - ISLAND.cx + 0.5) / ISLAND.rx;
@@ -102,13 +106,16 @@ export class World {
             type = 'bridge';
           } else if (isRiverTile(x, z)) {
             type = 'river';
+          } else if (isMarketStreet(x, z)) {
+            type = 'path';
           } else {
             type = d > 0.8 ? 'sand' : 'grass';
           }
         }
         this.tiles[x][z] = {
           x, z, type,
-          walkable: type === 'grass' || type === 'sand' || type === 'bridge',
+          walkable: type === 'grass' || type === 'sand' || type === 'bridge'
+                 || type === 'path' || type === 'dock',
         };
       }
     }
@@ -169,7 +176,9 @@ export class World {
         const base =
           t.type === 'grass'  ? 0x69a854 :
           t.type === 'sand'   ? 0xdcc894 :
-          t.type === 'bridge' ? 0xcc3333 : 0x96703f;
+          t.type === 'bridge' ? 0xcc3333 :
+          t.type === 'path'   ? 0x8a7a68 :
+          t.type === 'dock'   ? 0x8B5E3C : 0x96703f;
         color.setHex(base).offsetHSL(0, 0, (hash(x * 7 + 3, z * 13 + 1) - 0.5) * 0.05);
         const g = new THREE.BoxGeometry(1, 0.5, 1);
         const count = g.attributes.position.count;
