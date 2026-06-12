@@ -58,9 +58,9 @@ const placedBuildings: PlacedBuilding[] = [];
 const defaultPlacements = [
   {
     "file": "/models/buildings/shop.glb",
-    "x": 14,
-    "z": 17,
-    "rotationY": -1.5707963267948966
+    "x": 45,
+    "z": 36,
+    "rotationY": -7.853981633974483
   }
 ];
 

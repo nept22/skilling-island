@@ -10,8 +10,8 @@ const A = new THREE.Vector3();
 const B = new THREE.Vector3();
 
 export class Player {
-  tile: Pt = { x: 16, z: 28 };
-  prev: Pt = { x: 16, z: 28 };
+  tile: Pt = { x: 45, z: 39 };
+  prev: Pt = { x: 45, z: 39 };
   path: Pt[] = [];
   onArrive: (() => void) | null = null;
   group = new THREE.Group();

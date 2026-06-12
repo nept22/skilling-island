@@ -1,5 +1,12 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import {
+  SIZE, HALF, ISLAND, BANK_CHEST, RANGE,
+  inBay, inBridge, isRiverTile, inTown, inForest, inMineHills,
+} from './layout';
+
+// Re-export SIZE so pathfinding.ts and any other consumers keep working.
+export { SIZE, HALF } from './layout';
 
 export type TileType = 'ocean' | 'river' | 'sand' | 'grass' | 'bridge';
 
@@ -9,13 +16,6 @@ export interface Tile {
   type: TileType;
   walkable: boolean;
 }
-
-export const SIZE = 48;
-const HALF = SIZE / 2;
-
-// Town clearing — kept free of trees so there's room for the bank, furnace,
-// range and market stalls as those get built.
-const TOWN = { x0: 12, z0: 24, x1: 19, z1: 31 };
 
 export function toWorld(x: number, z: number, out = new THREE.Vector3()): THREE.Vector3 {
   return out.set(x - HALF + 0.5, 0, z - HALF + 0.5);
@@ -42,8 +42,8 @@ export class World {
   tiles: Tile[][] = [];
   trees: TreeSpot[] = [];
   rocks: { x: number; z: number }[] = [];
-  bankChest = { x: 14, z: 26 };
-  range = { x: 17, z: 25 };
+  bankChest = { x: BANK_CHEST.x, z: BANK_CHEST.z };
+  range = { x: RANGE.x, z: RANGE.z };
   group = new THREE.Group();
   water!: THREE.Mesh;
   clickTargets: THREE.Object3D[] = [];
@@ -73,66 +73,86 @@ export class World {
         let hasBank = false;
         for (let dx = -1; dx <= 1 && !hasBank; dx++) {
           for (let dz = -1; dz <= 1; dz++) {
-            if (this.walkable(x + dx, z + dz)) {
-              hasBank = true;
-              break;
-            }
+            if (this.walkable(x + dx, z + dz)) { hasBank = true; break; }
           }
         }
         if (!hasBank) continue;
         const d = (x - near.x) ** 2 + (z - near.z) ** 2;
-        if (d < bestDist) {
-          bestDist = d;
-          best = { x, z };
-        }
+        if (d < bestDist) { bestDist = d; best = { x, z }; }
       }
     }
     return best;
   }
 
   private generate(): void {
+    // Pass 1: classify every tile from zone rules.
     for (let x = 0; x < SIZE; x++) {
       this.tiles[x] = [];
       for (let z = 0; z < SIZE; z++) {
-        const nx = (x - HALF + 0.5) / 17;
-        const nz = (z - HALF + 0.5) / 14.5;
-        const d = nx * nx + nz * nz + (hash(x, z) - 0.5) * 0.07;
-        let type: TileType = 'ocean';
-        if (d < 1) type = d > 0.8 ? 'sand' : 'grass';
-        const riverCenter = HALF + Math.sin(z * 0.22) * 3.2;
-        if (type !== 'ocean' && Math.abs(x - riverCenter) < 1.7) {
-          type = z === 22 || z === 23 ? 'bridge' : 'river';
+        let type: TileType;
+        if (inBay(x, z)) {
+          type = 'ocean';
+        } else {
+          const nx = (x - ISLAND.cx + 0.5) / ISLAND.rx;
+          const nz = (z - ISLAND.cz + 0.5) / ISLAND.rz;
+          const d = nx * nx + nz * nz + (hash(x, z) - 0.5) * 0.07;
+          if (d >= 1) {
+            type = 'ocean';
+          } else if (inBridge(x, z)) {
+            type = 'bridge';
+          } else if (isRiverTile(x, z)) {
+            type = 'river';
+          } else {
+            type = d > 0.8 ? 'sand' : 'grass';
+          }
         }
         this.tiles[x][z] = {
-          x,
-          z,
-          type,
+          x, z, type,
           walkable: type === 'grass' || type === 'sand' || type === 'bridge',
         };
+      }
+    }
+
+    // Pass 2: grass adjacent to ocean (including bay) becomes sand (beach ring).
+    for (let x = 0; x < SIZE; x++) {
+      for (let z = 0; z < SIZE; z++) {
+        if (this.tiles[x][z].type !== 'grass') continue;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+          if (this.tiles[x + dx]?.[z + dz]?.type === 'ocean') {
+            this.tiles[x][z].type = 'sand';
+            break;
+          }
+        }
       }
     }
   }
 
   private decorate(): void {
-    this.tiles[this.bankChest.x][this.bankChest.z].walkable = false;
-    this.tiles[this.range.x][this.range.z].walkable = false;
+    this.tiles[BANK_CHEST.x][BANK_CHEST.z].walkable = false;
+    this.tiles[RANGE.x][RANGE.z].walkable = false;
+
     for (let x = 0; x < SIZE; x++) {
       for (let z = 0; z < SIZE; z++) {
         const t = this.tiles[x][z];
         if (t.type !== 'grass') continue;
-        if (x >= TOWN.x0 && x <= TOWN.x1 && z >= TOWN.z0 && z <= TOWN.z1) continue;
-        const nx = (x - HALF + 0.5) / 17;
-        const nz = (z - HALF + 0.5) / 14.5;
-        const inland = nx * nx + nz * nz < 0.62;
+        if (inTown(x, z)) continue; // town plots stay clear
+
         const h = hash(x * 3 + 11, z * 5 + 7);
-        if (inland && h > 0.92) {
+        if (inForest(x, z)) {
+          if (h > 0.82) {
+            const kind = hash(x * 7 + 1, z * 11 + 3) < 0.3 ? 'oak' : 'tree';
+            this.trees.push({ x, z, kind, mesh: new THREE.Group() });
+            t.walkable = false;
+          }
+        } else if (inMineHills(x, z)) {
+          if (h < 0.12) {
+            this.rocks.push({ x, z });
+            t.walkable = false;
+          }
+        } else if (h > 0.93) {
+          // Sparse trees on the rest of the island
           const kind = hash(x * 7 + 1, z * 11 + 3) < 0.3 ? 'oak' : 'tree';
-          // mesh assigned in build(); placeholder group so the field is never undefined
           this.trees.push({ x, z, kind, mesh: new THREE.Group() });
-          t.walkable = false;
-        } else if (x > 28 && z < 20 && h < 0.06) {
-          // Future mine site on the north-east hill.
-          this.rocks.push({ x, z });
           t.walkable = false;
         }
       }
@@ -146,7 +166,10 @@ export class World {
       for (let z = 0; z < SIZE; z++) {
         const t = this.tiles[x][z];
         if (t.type === 'ocean' || t.type === 'river') continue;
-        const base = t.type === 'grass' ? 0x69a854 : t.type === 'sand' ? 0xdcc894 : 0x96703f;
+        const base =
+          t.type === 'grass'  ? 0x69a854 :
+          t.type === 'sand'   ? 0xdcc894 :
+          t.type === 'bridge' ? 0xcc3333 : 0x96703f;
         color.setHex(base).offsetHSL(0, 0, (hash(x * 7 + 3, z * 13 + 1) - 0.5) * 0.05);
         const g = new THREE.BoxGeometry(1, 0.5, 1);
         const count = g.attributes.position.count;
@@ -249,7 +272,6 @@ function makeRange(at: THREE.Vector3): THREE.Group {
 
 function makeTree(at: THREE.Vector3, r: number, kind: 'tree' | 'oak' = 'tree'): THREE.Group {
   const g = new THREE.Group();
-
   const isOak = kind === 'oak';
   const trunkRadiusTop = isOak ? 0.09 * 1.25 : 0.09;
   const trunkRadiusBot = isOak ? 0.14 * 1.25 : 0.14;
@@ -271,7 +293,6 @@ function makeTree(at: THREE.Vector3, r: number, kind: 'tree' | 'oak' = 'tree'): 
   upper.position.y = 1.5;
   upper.castShadow = true;
 
-  // Canopy group — hide this to leave just the stump when the tree falls.
   const canopy = new THREE.Group();
   canopy.name = 'canopy';
   canopy.add(lower, upper);

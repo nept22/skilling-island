@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toWorld, toGrid } from './world';
+import { toWorld, toGrid, HALF } from './world';
 import type { BuildingPlacement } from './buildings';
 
 export interface PlacedBuilding {
@@ -21,9 +21,7 @@ function updateHighlight(helper: THREE.Box3Helper, root: THREE.Object3D): void {
 
 // Snap a world-space X or Z value back to the nearest tile-centre world coord.
 function snapToTile(world: number): number {
-  // toWorld(t, _) = t - HALF + 0.5  →  t = world + HALF - 0.5
-  // HALF = 24 for SIZE=48
-  const HALF = 24;
+  // toWorld(t) = t - HALF + 0.5  →  t = world + HALF - 0.5
   const tile = Math.round(world + HALF - 0.5);
   return tile - HALF + 0.5;
 }
